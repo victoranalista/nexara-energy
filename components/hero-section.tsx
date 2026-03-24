@@ -1,282 +1,346 @@
 "use client"
 
-import { useRef, useEffect, useState, useCallback } from "react"
+import { useRef, useEffect } from "react"
 import { motion, useScroll, useTransform, useInView } from "framer-motion"
 import { ArrowDown, MessageCircle } from "lucide-react"
+import * as THREE from "three"
 
-/* ══════════════════════════════════════════════════════
-   TrailVideo: trail.mp4 + sparks canvas reativo ao mouse
-   Vídeo roda nativo (GPU). Canvas leve só desenha sparks.
-   ══════════════════════════════════════════════════════ */
-function TrailVideo() {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
+/* ══════════════════════════════════════════════════════════════
+   EnergyGridThree  —  rede elétrica 3D com Three.js
+   Partículas fluindo em linhas, nodes âmbar pulsantes,
+   interação com mouse, estética on.energy.
+   ══════════════════════════════════════════════════════════════ */
+function EnergyGridThree() {
+  const mountRef = useRef<HTMLDivElement>(null)
 
-  // Force autoplay on mobile (iOS/Android block autoplay without interaction)
   useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
+    const mount = mountRef.current
+    if (!mount) return
 
-    const forcePlay = () => {
-      video.play().catch(() => {})
+    // ── Renderer ──────────────────────────────────────────────
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setSize(mount.clientWidth, mount.clientHeight)
+    renderer.setClearColor(0x000000, 0)
+    mount.appendChild(renderer.domElement)
+
+    // ── Scene / Camera ─────────────────────────────────────────
+    const scene  = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(60, mount.clientWidth / mount.clientHeight, 0.1, 2000)
+    camera.position.set(0, 0, 500)
+
+    // ── Mouse (normalized -1..1) ───────────────────────────────
+    const mouse = new THREE.Vector2(-999, -999)
+    const onMouseMove = (e: MouseEvent) => {
+      const r = mount.getBoundingClientRect()
+      mouse.x =  ((e.clientX - r.left) / r.width)  * 2 - 1
+      mouse.y = -((e.clientY - r.top)  / r.height) * 2 + 1
     }
-
-    // Try immediately
-    forcePlay()
-
-    // Also try on first user interaction (fallback for strict browsers)
-    const handler = () => { forcePlay(); cleanup() }
-    const cleanup = () => {
-      document.removeEventListener("touchstart", handler)
-      document.removeEventListener("click", handler)
-      document.removeEventListener("scroll", handler)
-    }
-    document.addEventListener("touchstart", handler, { once: true, passive: true })
-    document.addEventListener("click", handler, { once: true })
-    document.addEventListener("scroll", handler, { once: true, passive: true })
-
-    return cleanup
-  }, [])
-
-  // Canvas lightning — funciona em tudo
-  useEffect(() => {
-    const container = containerRef.current
-    const canvas = canvasRef.current
-    if (!container || !canvas) return
-
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-
-    let w = 0, h = 0
-    const resize = () => {
-      const r = container.getBoundingClientRect()
-      w = r.width; h = r.height
-      canvas.width = w; canvas.height = h
-    }
-    resize()
-    window.addEventListener("resize", resize)
-
-    let mx = -9999, my = -9999, active = false
-    let smoothX = -9999, smoothY = -9999
-    let prevX = -9999, prevY = -9999
-    let speed = 0
-
-    const onMove = (e: MouseEvent) => {
-      const r = container.getBoundingClientRect()
-      mx = e.clientX - r.left; my = e.clientY - r.top
-      active = true
-    }
-    const onLeave = () => { active = false }
+    const onMouseLeave = () => { mouse.set(-999, -999) }
     const onTouch = (e: TouchEvent) => {
-      const r = container.getBoundingClientRect()
+      const r = mount.getBoundingClientRect()
       const t = e.touches[0]
-      if (t) { mx = t.clientX - r.left; my = t.clientY - r.top; active = true }
+      if (t) {
+        mouse.x =  ((t.clientX - r.left) / r.width)  * 2 - 1
+        mouse.y = -((t.clientY - r.top)  / r.height) * 2 + 1
+      }
+    }
+    mount.addEventListener("mousemove", onMouseMove)
+    mount.addEventListener("mouseleave", onMouseLeave)
+    mount.addEventListener("touchmove", onTouch, { passive: true })
+    mount.addEventListener("touchend", onMouseLeave)
+
+    // ── Color palette ─────────────────────────────────────────
+    const AMBER  = new THREE.Color(0xf59e0b)
+    const AMBER2 = new THREE.Color(0xfbbf24)
+    const WHITE  = new THREE.Color(0xffffff)
+
+    // ── Build node grid ───────────────────────────────────────
+    const W = mount.clientWidth, H = mount.clientHeight
+    const COLS = Math.ceil(W / 110) + 2
+    const ROWS = Math.ceil(H / 90)  + 2
+    const cw   = W / (COLS - 1)
+    const rh   = H / (ROWS - 1)
+
+    interface NodeData {
+      pos: THREE.Vector3
+      baseX: number; baseY: number
+      energy: number; phase: number
+      mesh: THREE.Mesh
+    }
+    const nodeList: NodeData[] = []
+
+    // Node geometry — small circle sprite
+    const nodeGeo  = new THREE.CircleGeometry(3, 12)
+    const nodeMat  = new THREE.MeshBasicMaterial({ color: AMBER, transparent: true })
+
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if (Math.random() < 0.15) continue  // organic gaps
+
+        const jx = (Math.random() - 0.5) * cw * 0.35
+        const jy = (Math.random() - 0.5) * rh * 0.35
+        const x  = c * cw - W / 2 + jx
+        const y  = r * rh - H / 2 + jy
+
+        const mesh = new THREE.Mesh(nodeGeo, nodeMat.clone())
+        mesh.position.set(x, y, 0)
+        scene.add(mesh)
+
+        nodeList.push({
+          pos: new THREE.Vector3(x, y, 0),
+          baseX: x, baseY: y,
+          energy: Math.random(),
+          phase: Math.random() * Math.PI * 2,
+          mesh,
+        })
+      }
     }
 
-    container.addEventListener("mousemove", onMove)
-    container.addEventListener("mouseleave", onLeave)
-    container.addEventListener("touchmove", onTouch, { passive: true })
-    container.addEventListener("touchend", onLeave)
-
-    // Lightning bolts that persist and fade
-    interface Bolt {
-      segs: { x: number; y: number }[]
-      life: number; maxLife: number; hue: number; width: number
+    // ── Build edges (connect nearby nodes) ────────────────────
+    interface EdgeData {
+      a: number; b: number; dist: number
+      line: THREE.Line
+      positions: Float32Array
     }
-    const bolts: Bolt[] = []
-    const MAX_BOLTS = 20
+    const edgeList: EdgeData[] = []
+    const MAX_EDGE = Math.hypot(cw, rh) * 1.6
 
-    // Throttle bolt spawning
-    let lastSpawn = 0
-    const SPAWN_INTERVAL = 120 // ms between bolt spawns when moving
-
-    let raf = 0
-
-    const animate = () => {
-      ctx.clearRect(0, 0, w, h)
-
-      // Smooth mouse
-      smoothX += (mx - smoothX) * 0.12
-      smoothY += (my - smoothY) * 0.12
-
-      // Mouse speed
-      const ddx = smoothX - prevX, ddy = smoothY - prevY
-      speed = Math.sqrt(ddx * ddx + ddy * ddy)
-      prevX = smoothX; prevY = smoothY
-
-      const now = performance.now()
-
-      if (active && speed > 4 && now - lastSpawn > SPAWN_INTERVAL && bolts.length < MAX_BOLTS) {
-        lastSpawn = now
-
-        // More bolts when faster, max 3 per burst
-        const count = Math.min(Math.ceil(speed / 10), 3)
-
-        for (let b = 0; b < count; b++) {
-          const angle = Math.random() * Math.PI * 2
-          const segCount = 8 + Math.floor(Math.random() * 10)
-          const segs: { x: number; y: number }[] = []
-          let bx = smoothX
-          let by = smoothY
-          segs.push({ x: bx, y: by })
-
-          // Longer bolts when moving faster
-          const stepLen = 15 + Math.random() * 20 + speed * 2
-
-          for (let s = 0; s < segCount; s++) {
-            const jitter = 0.6 + Math.random()
-            bx += Math.cos(angle + (Math.random() - 0.5) * 1.8) * stepLen * jitter
-            by += Math.sin(angle + (Math.random() - 0.5) * 1.8) * stepLen * jitter
-            segs.push({ x: bx, y: by })
-          }
-
-          bolts.push({
-            segs,
-            life: 0,
-            maxLife: 8 + Math.random() * 12, // fast flash
-            hue: 30 + Math.random() * 25,
-            width: 0.8 + Math.random() * 1.5 + speed * 0.15,
+    for (let a = 0; a < nodeList.length; a++) {
+      let conn = 0
+      for (let b = a + 1; b < nodeList.length && conn < 4; b++) {
+        const d = nodeList[a].pos.distanceTo(nodeList[b].pos)
+        if (d < MAX_EDGE) {
+          const positions = new Float32Array([
+            nodeList[a].pos.x, nodeList[a].pos.y, 0,
+            nodeList[b].pos.x, nodeList[b].pos.y, 0,
+          ])
+          const geo = new THREE.BufferGeometry()
+          geo.setAttribute("position", new THREE.BufferAttribute(positions, 3))
+          const mat = new THREE.LineBasicMaterial({
+            color: AMBER, transparent: true, opacity: 0.07, linewidth: 1,
           })
+          const line = new THREE.Line(geo, mat)
+          scene.add(line)
+          edgeList.push({ a, b, dist: d, line, positions })
+          conn++
         }
       }
+    }
 
-      // Draw & update bolts
-      for (let i = bolts.length - 1; i >= 0; i--) {
-        const bolt = bolts[i]
-        bolt.life++
-        if (bolt.life > bolt.maxLife) { bolts.splice(i, 1); continue }
+    // ── Particles flowing along edges ─────────────────────────
+    interface ParticleData {
+      edgeIdx: number; pos: number; speed: number
+      mesh: THREE.Mesh
+    }
+    const particleList: ParticleData[] = []
+    const particleGeo = new THREE.CircleGeometry(2.5, 8)
 
-        const progress = bolt.life / bolt.maxLife
-        // Instant flash, then fade
-        const alpha = progress < 0.05 ? 1 : Math.pow(1 - progress, 2)
+    function spawnParticle(edgeIdx: number) {
+      const mat  = new THREE.MeshBasicMaterial({ color: WHITE, transparent: true, opacity: 0 })
+      const mesh = new THREE.Mesh(particleGeo, mat)
+      mesh.position.set(nodeList[edgeList[edgeIdx].a].pos.x, nodeList[edgeList[edgeIdx].a].pos.y, 1)
+      scene.add(mesh)
+      particleList.push({ edgeIdx, pos: 0, speed: 0.003 + Math.random() * 0.007, mesh })
+    }
 
-        // Outer electric glow
-        ctx.beginPath()
-        ctx.strokeStyle = `hsla(${bolt.hue}, 100%, 55%, ${alpha * 0.4})`
-        ctx.lineWidth = bolt.width + 4
-        ctx.shadowColor = `hsla(${bolt.hue}, 100%, 50%, ${alpha * 0.8})`
-        ctx.shadowBlur = 25
-        ctx.lineJoin = "round"
-        ctx.lineCap = "round"
-        bolt.segs.forEach((s, j) => {
-          if (j === 0) ctx.moveTo(s.x, s.y)
-          else ctx.lineTo(s.x, s.y)
-        })
-        ctx.stroke()
+    // Seed particles
+    for (let i = 0; i < Math.min(edgeList.length, 40); i++) {
+      spawnParticle(Math.floor(Math.random() * edgeList.length))
+    }
 
-        // Bright core
-        ctx.beginPath()
-        ctx.strokeStyle = `hsla(${bolt.hue}, 80%, 80%, ${alpha * 0.9})`
-        ctx.lineWidth = bolt.width
-        ctx.shadowColor = `hsla(${bolt.hue}, 100%, 65%, ${alpha * 0.5})`
-        ctx.shadowBlur = 12
-        bolt.segs.forEach((s, j) => {
-          if (j === 0) ctx.moveTo(s.x, s.y)
-          else ctx.lineTo(s.x, s.y)
-        })
-        ctx.stroke()
+    // Tail geometry per particle (line strip)
+    // We'll fake tails with a second smaller sphere behind the particle
+    // (keeping it simple and performant)
 
-        // White-hot center
-        ctx.beginPath()
-        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.6})`
-        ctx.lineWidth = Math.max(bolt.width * 0.3, 0.5)
-        ctx.shadowBlur = 0
-        bolt.segs.forEach((s, j) => {
-          if (j === 0) ctx.moveTo(s.x, s.y)
-          else ctx.lineTo(s.x, s.y)
-        })
-        ctx.stroke()
+    // ── Raycaster for mouse ────────────────────────────────────
+    const raycaster = new THREE.Raycaster()
+    const mousePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)
+    const mouseWorld = new THREE.Vector3()
+
+    // ── Resize ────────────────────────────────────────────────
+    const onResize = () => {
+      const w = mount.clientWidth, h = mount.clientHeight
+      camera.aspect = w / h
+      camera.updateProjectionMatrix()
+      renderer.setSize(w, h)
+    }
+    window.addEventListener("resize", onResize)
+
+    // ── Animation loop ────────────────────────────────────────
+    let raf = 0
+    let lastSpawn = 0
+    const clock = new THREE.Clock()
+
+    const animate = () => {
+      raf = requestAnimationFrame(animate)
+      const dt      = clock.getDelta()
+      const elapsed = clock.getElapsedTime()
+
+      // Mouse world position
+      raycaster.setFromCamera(mouse, camera)
+      raycaster.ray.intersectPlane(mousePlane, mouseWorld)
+      const hasMouse = mouse.x > -900
+
+      // ── Update nodes ──
+      nodeList.forEach(n => {
+        n.energy = (n.energy + dt * 0.6) % 1
+
+        const pulse  = Math.sin(elapsed * 2.5 + n.phase) * 0.5 + 0.5
+        const hover  = hasMouseeffect(n, mouseWorld)
+        const baseA  = 0.08 + pulse * 0.08 + hover * 0.7
+        const scale  = 0.4 + hover * 1.8 + n.energy * 0.3;
+
+        (n.mesh.material as THREE.MeshBasicMaterial).opacity = Math.min(baseA, 1)
+        n.mesh.scale.setScalar(scale)
+      })
+
+      // ── Update edges ──
+      edgeList.forEach(e => {
+        const midX = (nodeList[e.a].pos.x + nodeList[e.b].pos.x) / 2
+        const midY = (nodeList[e.a].pos.y + nodeList[e.b].pos.y) / 2
+        const md   = hasMouseeffectXY(midX, midY, mouseWorld)
+        const op   = 0.04 + md * 0.35;
+        (e.line.material as THREE.LineBasicMaterial).opacity = op
+      })
+
+      // ── Spawn particles ──
+      const now = performance.now()
+      if (now - lastSpawn > 80 && particleList.length < 120) {
+        lastSpawn = now
+        // Prefer edges near mouse
+        let ei = Math.floor(Math.random() * edgeList.length)
+        if (hasMouseeffectXY(0, 0, mouseWorld) > 0 && edgeList.length > 0) {
+          let best = ei, bestD = Infinity
+          for (let k = 0; k < 12; k++) {
+            const idx = Math.floor(Math.random() * edgeList.length)
+            const e   = edgeList[idx]
+            const midX = (nodeList[e.a].pos.x + nodeList[e.b].pos.x) / 2
+            const midY = (nodeList[e.a].pos.y + nodeList[e.b].pos.y) / 2
+            const d = Math.hypot(midX - mouseWorld.x, midY - mouseWorld.y)
+            if (d < bestD) { bestD = d; best = idx }
+          }
+          ei = best
+        }
+        spawnParticle(ei)
       }
 
-      ctx.shadowBlur = 0
+      // ── Update particles ──
+      for (let i = particleList.length - 1; i >= 0; i--) {
+        const p = particleList[i]
+        p.pos += p.speed
 
-      raf = requestAnimationFrame(animate)
+        if (p.pos >= 1) {
+          scene.remove(p.mesh)
+          p.mesh.geometry.dispose()
+          ;(p.mesh.material as THREE.Material).dispose()
+          particleList.splice(i, 1)
+          continue
+        }
+
+        const e  = edgeList[p.edgeIdx]
+        const na = nodeList[e.a], nb = nodeList[e.b]
+        const x  = na.pos.x + (nb.pos.x - na.pos.x) * p.pos
+        const y  = na.pos.y + (nb.pos.y - na.pos.y) * p.pos
+        p.mesh.position.set(x, y, 1)
+
+        // Fade in/out + mouse boost
+        const fade  = p.pos < 0.1 ? p.pos / 0.1 : p.pos > 0.85 ? (1 - p.pos) / 0.15 : 1
+        const hover = hasMouseeffectXY(x, y, mouseWorld)
+        const op    = Math.min(fade * (0.7 + hover * 0.3), 1)
+        ;(p.mesh.material as THREE.MeshBasicMaterial).opacity = op
+
+        // Color: white-hot when fast/hovered, amber otherwise
+        const col = new THREE.Color().lerpColors(AMBER2, WHITE, hover * 0.7)
+        ;(p.mesh.material as THREE.MeshBasicMaterial).color.copy(col)
+        p.mesh.scale.setScalar(0.6 + hover * 0.8)
+      }
+
+      // ── Subtle camera drift ──
+      camera.position.x += (mouse.x * 15 - camera.position.x) * 0.03
+      camera.position.y += (mouse.y * 10 - camera.position.y) * 0.03
+      camera.lookAt(0, 0, 0)
+
+      renderer.render(scene, camera)
     }
-    raf = requestAnimationFrame(animate)
+
+    // Helper: distance influence (0-1)
+    function hasMouseeffect(n: NodeData, mw: THREE.Vector3): number {
+      if (!hasMouseGlobal()) return 0
+      const d = Math.hypot(n.pos.x - mw.x, n.pos.y - mw.y)
+      return d < 180 ? Math.pow(1 - d / 180, 1.5) : 0
+    }
+    function hasMouseeffectXY(x: number, y: number, mw: THREE.Vector3): number {
+      if (!hasMouseGlobal()) return 0
+      const d = Math.hypot(x - mw.x, y - mw.y)
+      return d < 180 ? Math.pow(1 - d / 180, 1.5) : 0
+    }
+    function hasMouseGlobal() { return mouse.x > -900 }
+
+    animate()
 
     return () => {
       cancelAnimationFrame(raf)
-      window.removeEventListener("resize", resize)
-      container.removeEventListener("mousemove", onMove)
-      container.removeEventListener("mouseleave", onLeave)
-      container.removeEventListener("touchmove", onTouch)
-      container.removeEventListener("touchend", onLeave)
+      window.removeEventListener("resize", onResize)
+      mount.removeEventListener("mousemove", onMouseMove)
+      mount.removeEventListener("mouseleave", onMouseLeave)
+      mount.removeEventListener("touchmove", onTouch)
+      mount.removeEventListener("touchend", onMouseLeave)
+      renderer.dispose()
+      if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement)
     }
   }, [])
 
-  return (
-    <div ref={containerRef} className="absolute inset-0 z-0">
-      <video
-        ref={videoRef}
-        src="/video/trail.mp4"
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="auto"
-        className="hero-video"
-      />
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full pointer-events-none z-[1]"
-      />
-    </div>
-  )
+  return <div ref={mountRef} className="absolute inset-0 z-0" />
 }
 
-/* ── Energy Streams Button (on.energy) ── */
-function EnergyButton({
-  children, href, className = "",
-}: { children: React.ReactNode; href: string; className?: string }) {
-  const streamStyles = [
-    { top: "12%", left: "-10%", width: "2.5rem", delay: "0s" },
-    { top: "67%", left: "15%", width: "3rem", delay: "0.05s" },
-    { top: "34%", left: "-45%", width: "2.5rem", delay: "0.1s" },
-    { top: "82%", left: "70%", width: "2rem", delay: "0.15s" },
-    { top: "19%", left: "5%", width: "2.5rem", delay: "0.2s" },
-    { top: "56%", left: "30%", width: "3.5rem", delay: "0.25s" },
-    { top: "91%", left: "-55%", width: "2.5rem", delay: "0.3s" },
-    { top: "43%", left: "80%", width: "2.8rem", delay: "0.35s" },
-    { top: "28%", left: "-20%", width: "2.5rem", delay: "0.4s" },
-    { top: "74%", left: "40%", width: "2.2rem", delay: "0.08s" },
-    { top: "8%", left: "-65%", width: "2.5rem", delay: "0.12s" },
-    { top: "51%", left: "10%", width: "3.2rem", delay: "0.18s" },
-    { top: "88%", left: "-50%", width: "2.5rem", delay: "0.22s" },
-    { top: "38%", left: "25%", width: "2.6rem", delay: "0.28s" },
-    { top: "61%", left: "-75%", width: "2.5rem", delay: "0.32s" },
+/* ── Energy Streams Button ──────────────────────────────────── */
+function EnergyButton({ children, href, className = "" }: {
+  children: React.ReactNode; href: string; className?: string
+}) {
+  const streams = [
+    { top: "12%", left: "-10%",  width: "2.5rem", delay: "0s"    },
+    { top: "67%", left: "15%",   width: "3rem",   delay: "0.05s" },
+    { top: "34%", left: "-45%",  width: "2.5rem", delay: "0.1s"  },
+    { top: "82%", left: "70%",   width: "2rem",   delay: "0.15s" },
+    { top: "19%", left: "5%",    width: "2.5rem", delay: "0.2s"  },
+    { top: "56%", left: "30%",   width: "3.5rem", delay: "0.25s" },
+    { top: "91%", left: "-55%",  width: "2.5rem", delay: "0.3s"  },
+    { top: "43%", left: "80%",   width: "2.8rem", delay: "0.35s" },
+    { top: "28%", left: "-20%",  width: "2.5rem", delay: "0.4s"  },
+    { top: "74%", left: "40%",   width: "2.2rem", delay: "0.08s" },
+    { top: "8%",  left: "-65%",  width: "2.5rem", delay: "0.12s" },
+    { top: "51%", left: "10%",   width: "3.2rem", delay: "0.18s" },
+    { top: "88%", left: "-50%",  width: "2.5rem", delay: "0.22s" },
+    { top: "38%", left: "25%",   width: "2.6rem", delay: "0.28s" },
+    { top: "61%", left: "-75%",  width: "2.5rem", delay: "0.32s" },
   ]
-
   return (
-    <a
-      href={href}
+    <a href={href}
       target={href.startsWith("http") ? "_blank" : undefined}
       rel={href.startsWith("http") ? "noopener noreferrer" : undefined}
       className={`energy-button group ${className}`}
     >
       <span className="energy-streams">
-        {streamStyles.map((s, i) => (
-          <span key={i} className="stream" style={{ top: s.top, left: s.left, width: s.width, animationDelay: s.delay }} />
+        {streams.map((s, i) => (
+          <span key={i} className="stream"
+            style={{ top: s.top, left: s.left, width: s.width, animationDelay: s.delay }} />
         ))}
       </span>
-      <span className="energy-bg" />
-      <span className="energy-fill" />
-      <span className="energy-glow" />
-      <span className="energy-label">{children}</span>
+      <span className="energy-bg" /><span className="energy-fill" />
+      <span className="energy-glow" /><span className="energy-label">{children}</span>
     </a>
   )
 }
 
-/* ── Stat Card ── */
+/* ── Stat Card ──────────────────────────────────────────────── */
 function StatCard({ number, suffix, title, description, delay }: {
   number: string; suffix?: string; title: string; description: string; delay: number
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const isInView = useInView(ref, { once: true, margin: "-50px" })
-
   return (
-    <motion.div
-      ref={ref}
+    <motion.div ref={ref}
       initial={{ opacity: 0, y: 40 }}
       animate={isInView ? { opacity: 1, y: 0 } : {}}
       transition={{ duration: 0.7, delay, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -284,8 +348,7 @@ function StatCard({ number, suffix, title, description, delay }: {
     >
       <div className="stat-number-wrapper">
         <div className="stat-number">
-          {number}
-          {suffix && <span className="stat-suffix">{suffix}</span>}
+          {number}{suffix && <span className="stat-suffix">{suffix}</span>}
         </div>
       </div>
       <div className="stat-content">
@@ -296,26 +359,22 @@ function StatCard({ number, suffix, title, description, delay }: {
   )
 }
 
+/* ── Hero Section ───────────────────────────────────────────── */
 export function HeroSection() {
-  const sectionRef = useRef<HTMLDivElement>(null)
+  const sectionRef  = useRef<HTMLDivElement>(null)
   const { scrollYProgress } = useScroll({ target: sectionRef, offset: ["start start", "end start"] })
   const contentOpacity = useTransform(scrollYProgress, [0, 0.5], [1, 0])
-  const textRef = useRef<HTMLDivElement>(null)
+  const textRef    = useRef<HTMLDivElement>(null)
   const textInView = useInView(textRef, { once: true })
-
   const whatsappUrl = "https://wa.me/5561994227754?text=Olá!%20Gostaria%20de%20saber%20mais%20sobre%20os%20painéis%20solares%20Nexara%20Energy."
 
   return (
     <>
       <section ref={sectionRef} className="hero-fullbleed">
-        <TrailVideo />
+        <EnergyGridThree />
         <div className="hero-video-overlay" />
 
-        <motion.div
-          ref={textRef}
-          style={{ opacity: contentOpacity }}
-          className="hero-content"
-        >
+        <motion.div ref={textRef} style={{ opacity: contentOpacity }} className="hero-content">
           <motion.p
             initial={{ opacity: 0, y: 15 }}
             animate={textInView ? { opacity: 1, y: 0 } : {}}
@@ -358,8 +417,7 @@ export function HeroSection() {
         </motion.div>
 
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
           transition={{ delay: 1.2, duration: 0.8 }}
           className="hero-scroll-indicator"
         >
@@ -375,10 +433,10 @@ export function HeroSection() {
 
       <section className="stats-cards-section">
         <div className="stats-cards-grid">
-          <StatCard number="98" suffix="%" title="Eficiência Energética" description="Painéis de última geração com tecnologia AI para máximo aproveitamento solar." delay={0} />
-          <StatCard number="25" suffix=" anos" title="Garantia Total" description="Durabilidade comprovada com garantia líder no mercado brasileiro." delay={0.1} />
-          <StatCard number="85" suffix="%" title="Economia na Conta de Luz" description="Redução média comprovada pelos nossos clientes em Brasília e região." delay={0.2} />
-          <StatCard number="500" suffix="+" title="Projetos Instalados" description="Mais de 500 residências e empresas confiaram na Nexara Energy." delay={0.3} />
+          <StatCard number="98"  suffix="%"     title="Eficiência Energética"  description="Painéis de última geração com tecnologia AI para máximo aproveitamento solar." delay={0}   />
+          <StatCard number="25"  suffix=" anos" title="Garantia Total"         description="Durabilidade comprovada com garantia líder no mercado brasileiro."           delay={0.1} />
+          <StatCard number="85"  suffix="%"     title="Economia na Conta de Luz" description="Redução média comprovada pelos nossos clientes em Brasília e região."     delay={0.2} />
+          <StatCard number="500" suffix="+"     title="Projetos Instalados"    description="Mais de 500 residências e empresas confiaram na Nexara Energy."             delay={0.3} />
         </div>
       </section>
     </>
