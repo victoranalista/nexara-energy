@@ -5,41 +5,13 @@ import { motion, useScroll, useTransform, useInView } from "framer-motion"
 import { ArrowDown, MessageCircle } from "lucide-react"
 
 /* ══════════════════════════════════════════════════════
-   TrailVideo: trail.mp4 + sparks canvas reativo ao mouse
-   Vídeo roda nativo (GPU). Canvas leve só desenha sparks.
+   EnergyCableCanvas: Cabo de energia animado com raios
+   Canvas puro, sem vídeo, qualidade perfeita em qualquer tela.
    ══════════════════════════════════════════════════════ */
-function TrailVideo() {
+function EnergyCableCanvas() {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
 
-  // Force autoplay on mobile (iOS/Android block autoplay without interaction)
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
-
-    const forcePlay = () => {
-      video.play().catch(() => {})
-    }
-
-    // Try immediately
-    forcePlay()
-
-    // Also try on first user interaction (fallback for strict browsers)
-    const handler = () => { forcePlay(); cleanup() }
-    const cleanup = () => {
-      document.removeEventListener("touchstart", handler)
-      document.removeEventListener("click", handler)
-      document.removeEventListener("scroll", handler)
-    }
-    document.addEventListener("touchstart", handler, { once: true, passive: true })
-    document.addEventListener("click", handler, { once: true })
-    document.addEventListener("scroll", handler, { once: true, passive: true })
-
-    return cleanup
-  }, [])
-
-  // Canvas lightning — funciona em tudo
   useEffect(() => {
     const container = containerRef.current
     const canvas = canvasRef.current
@@ -49,14 +21,22 @@ function TrailVideo() {
     if (!ctx) return
 
     let w = 0, h = 0
+    let dpr = window.devicePixelRatio || 1
+
     const resize = () => {
       const r = container.getBoundingClientRect()
+      dpr = window.devicePixelRatio || 1
       w = r.width; h = r.height
-      canvas.width = w; canvas.height = h
+      canvas.width = w * dpr
+      canvas.height = h * dpr
+      canvas.style.width = w + "px"
+      canvas.style.height = h + "px"
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     }
     resize()
     window.addEventListener("resize", resize)
 
+    // Mouse tracking for interactive bolts
     let mx = -9999, my = -9999, active = false
     let smoothX = -9999, smoothY = -9999
     let prevX = -9999, prevY = -9999
@@ -79,116 +59,315 @@ function TrailVideo() {
     container.addEventListener("touchmove", onTouch, { passive: true })
     container.addEventListener("touchend", onLeave)
 
-    // Lightning bolts that persist and fade
-    interface Bolt {
-      segs: { x: number; y: number }[]
-      life: number; maxLife: number; hue: number; width: number
+    // ── Cable path: smooth S-curve across the screen ──
+    function getCablePath(time: number): { x: number; y: number }[] {
+      const points: { x: number; y: number }[] = []
+      const segments = 120
+      for (let i = 0; i <= segments; i++) {
+        const t = i / segments
+        const x = t * w
+        // Main S-curve with subtle time-based wave motion
+        const baseY = h * 0.5
+        const wave1 = Math.sin(t * Math.PI * 2.5 + time * 0.4) * h * 0.12
+        const wave2 = Math.sin(t * Math.PI * 1.2 - time * 0.25) * h * 0.06
+        const wave3 = Math.sin(t * Math.PI * 4 + time * 0.8) * h * 0.015
+        const y = baseY + wave1 + wave2 + wave3
+        points.push({ x, y })
+      }
+      return points
     }
-    const bolts: Bolt[] = []
-    const MAX_BOLTS = 20
 
-    // Throttle bolt spawning
-    let lastSpawn = 0
-    const SPAWN_INTERVAL = 120 // ms between bolt spawns when moving
+    // ── Energy pulses flowing along cable ──
+    interface EnergyPulse {
+      position: number  // 0-1 along cable
+      speed: number
+      intensity: number
+      width: number
+      hue: number
+    }
+
+    const pulses: EnergyPulse[] = []
+    let lastPulseTime = 0
+    const PULSE_INTERVAL = 400
+
+    // ── Lightning bolts branching from cable ──
+    interface CableBolt {
+      originT: number  // position along cable (0-1)
+      segs: { x: number; y: number }[]
+      life: number
+      maxLife: number
+      hue: number
+      width: number
+    }
+
+    const cableBolts: CableBolt[] = []
+    let lastBoltTime = 0
+    const BOLT_INTERVAL = 800
+
+    // ── Mouse-triggered bolts ──
+    interface MouseBolt {
+      segs: { x: number; y: number }[]
+      life: number
+      maxLife: number
+      hue: number
+      width: number
+    }
+    const mouseBolts: MouseBolt[] = []
+    let lastMouseBolt = 0
 
     let raf = 0
+    const startTime = performance.now()
 
     const animate = () => {
+      const now = performance.now()
+      const elapsed = (now - startTime) / 1000
       ctx.clearRect(0, 0, w, h)
 
-      // Smooth mouse
-      smoothX += (mx - smoothX) * 0.12
-      smoothY += (my - smoothY) * 0.12
+      // Get current cable path
+      const cable = getCablePath(elapsed)
 
-      // Mouse speed
-      const ddx = smoothX - prevX, ddy = smoothY - prevY
-      speed = Math.sqrt(ddx * ddx + ddy * ddy)
-      prevX = smoothX; prevY = smoothY
+      // ── Draw ambient glow behind cable ──
+      ctx.save()
+      ctx.beginPath()
+      cable.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y)
+        else ctx.lineTo(p.x, p.y)
+      })
+      ctx.strokeStyle = "rgba(245, 158, 11, 0.04)"
+      ctx.lineWidth = 80
+      ctx.shadowColor = "rgba(245, 158, 11, 0.08)"
+      ctx.shadowBlur = 60
+      ctx.filter = "blur(30px)"
+      ctx.stroke()
+      ctx.restore()
 
-      const now = performance.now()
+      // ── Draw the main cable (dark core) ──
+      ctx.beginPath()
+      cable.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y)
+        else ctx.lineTo(p.x, p.y)
+      })
+      ctx.strokeStyle = "rgba(40, 40, 40, 0.9)"
+      ctx.lineWidth = 3
+      ctx.lineJoin = "round"
+      ctx.lineCap = "round"
+      ctx.shadowBlur = 0
+      ctx.stroke()
 
-      if (active && speed > 4 && now - lastSpawn > SPAWN_INTERVAL && bolts.length < MAX_BOLTS) {
-        lastSpawn = now
+      // ── Draw cable edge glow ──
+      ctx.beginPath()
+      cable.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y)
+        else ctx.lineTo(p.x, p.y)
+      })
+      ctx.strokeStyle = "rgba(245, 158, 11, 0.12)"
+      ctx.lineWidth = 5
+      ctx.shadowColor = "rgba(245, 158, 11, 0.3)"
+      ctx.shadowBlur = 15
+      ctx.stroke()
+      ctx.shadowBlur = 0
 
-        // More bolts when faster, max 3 per burst
-        const count = Math.min(Math.ceil(speed / 10), 3)
+      // ── Spawn energy pulses ──
+      if (now - lastPulseTime > PULSE_INTERVAL) {
+        lastPulseTime = now
+        pulses.push({
+          position: -0.05,
+          speed: 0.15 + Math.random() * 0.2,
+          intensity: 0.6 + Math.random() * 0.4,
+          width: 0.03 + Math.random() * 0.04,
+          hue: 30 + Math.random() * 20,
+        })
+      }
 
-        for (let b = 0; b < count; b++) {
-          const angle = Math.random() * Math.PI * 2
-          const segCount = 8 + Math.floor(Math.random() * 10)
-          const segs: { x: number; y: number }[] = []
-          let bx = smoothX
-          let by = smoothY
-          segs.push({ x: bx, y: by })
+      // ── Draw & update energy pulses ──
+      for (let i = pulses.length - 1; i >= 0; i--) {
+        const pulse = pulses[i]
+        pulse.position += pulse.speed * 0.016
 
-          // Longer bolts when moving faster
-          const stepLen = 15 + Math.random() * 20 + speed * 2
+        if (pulse.position > 1.05) { pulses.splice(i, 1); continue }
+
+        // Find position on cable
+        const idx = Math.floor(pulse.position * (cable.length - 1))
+        const nextIdx = Math.min(idx + 1, cable.length - 1)
+        if (idx < 0 || idx >= cable.length) continue
+
+        const p = cable[Math.max(0, idx)]
+        const pNext = cable[nextIdx]
+
+        // Draw pulse glow
+        const pulseAlpha = pulse.intensity * (
+          pulse.position < 0.1 ? pulse.position / 0.1 :
+          pulse.position > 0.9 ? (1 - pulse.position) / 0.1 : 1
+        )
+
+        // Wide outer glow
+        const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 60)
+        grad.addColorStop(0, `hsla(${pulse.hue}, 100%, 65%, ${pulseAlpha * 0.35})`)
+        grad.addColorStop(0.4, `hsla(${pulse.hue}, 100%, 50%, ${pulseAlpha * 0.12})`)
+        grad.addColorStop(1, "transparent")
+        ctx.fillStyle = grad
+        ctx.fillRect(p.x - 60, p.y - 60, 120, 120)
+
+        // Bright core line segment
+        const segStart = Math.max(0, Math.floor((pulse.position - pulse.width) * (cable.length - 1)))
+        const segEnd = Math.min(cable.length - 1, Math.floor((pulse.position + pulse.width) * (cable.length - 1)))
+
+        if (segEnd > segStart) {
+          // Core glow
+          ctx.beginPath()
+          for (let s = segStart; s <= segEnd; s++) {
+            if (s === segStart) ctx.moveTo(cable[s].x, cable[s].y)
+            else ctx.lineTo(cable[s].x, cable[s].y)
+          }
+          ctx.strokeStyle = `hsla(${pulse.hue}, 100%, 70%, ${pulseAlpha * 0.8})`
+          ctx.lineWidth = 6
+          ctx.shadowColor = `hsla(${pulse.hue}, 100%, 60%, ${pulseAlpha})`
+          ctx.shadowBlur = 20
+          ctx.stroke()
+
+          // White-hot center
+          ctx.beginPath()
+          for (let s = segStart; s <= segEnd; s++) {
+            if (s === segStart) ctx.moveTo(cable[s].x, cable[s].y)
+            else ctx.lineTo(cable[s].x, cable[s].y)
+          }
+          ctx.strokeStyle = `rgba(255, 255, 255, ${pulseAlpha * 0.9})`
+          ctx.lineWidth = 2
+          ctx.shadowColor = `rgba(255, 255, 255, ${pulseAlpha * 0.5})`
+          ctx.shadowBlur = 8
+          ctx.stroke()
+          ctx.shadowBlur = 0
+        }
+      }
+
+      // ── Spawn lightning bolts from cable ──
+      if (now - lastBoltTime > BOLT_INTERVAL + Math.random() * 600) {
+        lastBoltTime = now
+        const originT = 0.1 + Math.random() * 0.8
+        const idx = Math.floor(originT * (cable.length - 1))
+        const origin = cable[idx]
+        if (origin) {
+          const angle = (Math.random() > 0.5 ? -1 : 1) * (Math.PI / 4 + Math.random() * Math.PI / 3)
+          const segCount = 5 + Math.floor(Math.random() * 8)
+          const segs: { x: number; y: number }[] = [{ x: origin.x, y: origin.y }]
+          let bx = origin.x, by = origin.y
+          const stepLen = 15 + Math.random() * 25
 
           for (let s = 0; s < segCount; s++) {
-            const jitter = 0.6 + Math.random()
-            bx += Math.cos(angle + (Math.random() - 0.5) * 1.8) * stepLen * jitter
-            by += Math.sin(angle + (Math.random() - 0.5) * 1.8) * stepLen * jitter
+            bx += Math.cos(angle + (Math.random() - 0.5) * 1.2) * stepLen * (0.5 + Math.random())
+            by += Math.sin(angle + (Math.random() - 0.5) * 1.2) * stepLen * (0.5 + Math.random())
             segs.push({ x: bx, y: by })
           }
 
-          bolts.push({
+          cableBolts.push({
+            originT,
             segs,
             life: 0,
-            maxLife: 8 + Math.random() * 12, // fast flash
-            hue: 30 + Math.random() * 25,
-            width: 0.8 + Math.random() * 1.5 + speed * 0.15,
+            maxLife: 6 + Math.random() * 10,
+            hue: 25 + Math.random() * 30,
+            width: 0.6 + Math.random() * 1.2,
           })
         }
       }
 
-      // Draw & update bolts
-      for (let i = bolts.length - 1; i >= 0; i--) {
-        const bolt = bolts[i]
+      // ── Draw cable bolts ──
+      for (let i = cableBolts.length - 1; i >= 0; i--) {
+        const bolt = cableBolts[i]
         bolt.life++
-        if (bolt.life > bolt.maxLife) { bolts.splice(i, 1); continue }
+        if (bolt.life > bolt.maxLife) { cableBolts.splice(i, 1); continue }
+
+        // Update origin position (cable moves)
+        const idx = Math.floor(bolt.originT * (cable.length - 1))
+        const currentOrigin = cable[Math.max(0, idx)]
+        if (currentOrigin && bolt.segs[0]) {
+          const dx = currentOrigin.x - bolt.segs[0].x
+          const dy = currentOrigin.y - bolt.segs[0].y
+          bolt.segs.forEach(s => { s.x += dx; s.y += dy })
+        }
 
         const progress = bolt.life / bolt.maxLife
-        // Instant flash, then fade
-        const alpha = progress < 0.05 ? 1 : Math.pow(1 - progress, 2)
+        const alpha = progress < 0.05 ? 1 : Math.pow(1 - progress, 2.5)
 
-        // Outer electric glow
-        ctx.beginPath()
-        ctx.strokeStyle = `hsla(${bolt.hue}, 100%, 55%, ${alpha * 0.4})`
-        ctx.lineWidth = bolt.width + 4
-        ctx.shadowColor = `hsla(${bolt.hue}, 100%, 50%, ${alpha * 0.8})`
-        ctx.shadowBlur = 25
-        ctx.lineJoin = "round"
-        ctx.lineCap = "round"
-        bolt.segs.forEach((s, j) => {
-          if (j === 0) ctx.moveTo(s.x, s.y)
-          else ctx.lineTo(s.x, s.y)
-        })
-        ctx.stroke()
-
-        // Bright core
-        ctx.beginPath()
-        ctx.strokeStyle = `hsla(${bolt.hue}, 80%, 80%, ${alpha * 0.9})`
-        ctx.lineWidth = bolt.width
-        ctx.shadowColor = `hsla(${bolt.hue}, 100%, 65%, ${alpha * 0.5})`
-        ctx.shadowBlur = 12
-        bolt.segs.forEach((s, j) => {
-          if (j === 0) ctx.moveTo(s.x, s.y)
-          else ctx.lineTo(s.x, s.y)
-        })
-        ctx.stroke()
-
-        // White-hot center
-        ctx.beginPath()
-        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.6})`
-        ctx.lineWidth = Math.max(bolt.width * 0.3, 0.5)
-        ctx.shadowBlur = 0
-        bolt.segs.forEach((s, j) => {
-          if (j === 0) ctx.moveTo(s.x, s.y)
-          else ctx.lineTo(s.x, s.y)
-        })
-        ctx.stroke()
+        drawBolt(ctx, bolt.segs, bolt.hue, alpha, bolt.width)
       }
 
+      // ── Mouse interactive bolts ──
+      smoothX += (mx - smoothX) * 0.12
+      smoothY += (my - smoothY) * 0.12
+      const ddx = smoothX - prevX, ddy = smoothY - prevY
+      speed = Math.sqrt(ddx * ddx + ddy * ddy)
+      prevX = smoothX; prevY = smoothY
+
+      if (active && speed > 3 && now - lastMouseBolt > 100 && mouseBolts.length < 25) {
+        lastMouseBolt = now
+
+        // Find nearest cable point
+        let nearestDist = Infinity, nearestIdx = 0
+        cable.forEach((p, idx) => {
+          const d = Math.hypot(p.x - smoothX, p.y - smoothY)
+          if (d < nearestDist) { nearestDist = d; nearestIdx = idx }
+        })
+
+        const count = Math.min(Math.ceil(speed / 8), 3)
+        for (let b = 0; b < count; b++) {
+          const origin = nearestDist < 200 ? cable[nearestIdx] : { x: smoothX, y: smoothY }
+          const target = nearestDist < 200 ? { x: smoothX, y: smoothY } : cable[nearestIdx]
+
+          const segs: { x: number; y: number }[] = [{ x: origin.x, y: origin.y }]
+          const segCount = 6 + Math.floor(Math.random() * 8)
+          let bx = origin.x, by = origin.y
+          const baseAngle = Math.atan2(target.y - origin.y, target.x - origin.x)
+
+          for (let s = 0; s < segCount; s++) {
+            const t = (s + 1) / segCount
+            const targetX = origin.x + (target.x - origin.x) * t
+            const targetY = origin.y + (target.y - origin.y) * t
+            bx = targetX + (Math.random() - 0.5) * 40
+            by = targetY + (Math.random() - 0.5) * 40
+            segs.push({ x: bx, y: by })
+          }
+
+          mouseBolts.push({
+            segs,
+            life: 0,
+            maxLife: 6 + Math.random() * 10,
+            hue: 25 + Math.random() * 30,
+            width: 0.6 + Math.random() * 1.5 + speed * 0.1,
+          })
+        }
+      }
+
+      // ── Draw mouse bolts ──
+      for (let i = mouseBolts.length - 1; i >= 0; i--) {
+        const bolt = mouseBolts[i]
+        bolt.life++
+        if (bolt.life > bolt.maxLife) { mouseBolts.splice(i, 1); continue }
+
+        const progress = bolt.life / bolt.maxLife
+        const alpha = progress < 0.05 ? 1 : Math.pow(1 - progress, 2)
+
+        drawBolt(ctx, bolt.segs, bolt.hue, alpha, bolt.width)
+      }
+
+      // ── Floating ambient particles near cable ──
+      const particleCount = 30
+      for (let i = 0; i < particleCount; i++) {
+        const t = (i / particleCount + elapsed * 0.02) % 1
+        const idx = Math.floor(t * (cable.length - 1))
+        const p = cable[Math.max(0, Math.min(idx, cable.length - 1))]
+        if (!p) continue
+
+        const offsetX = Math.sin(elapsed * 2 + i * 7.3) * 30
+        const offsetY = Math.cos(elapsed * 1.5 + i * 4.1) * 20
+        const particleAlpha = 0.15 + Math.sin(elapsed * 3 + i * 2.1) * 0.1
+
+        ctx.beginPath()
+        ctx.arc(p.x + offsetX, p.y + offsetY, 1 + Math.random(), 0, Math.PI * 2)
+        ctx.fillStyle = `hsla(35, 100%, 65%, ${particleAlpha})`
+        ctx.shadowColor = "hsla(35, 100%, 60%, 0.4)"
+        ctx.shadowBlur = 6
+        ctx.fill()
+      }
       ctx.shadowBlur = 0
 
       raf = requestAnimationFrame(animate)
@@ -207,22 +386,59 @@ function TrailVideo() {
 
   return (
     <div ref={containerRef} className="absolute inset-0 z-0">
-      <video
-        ref={videoRef}
-        src="/video/trail.mp4"
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="auto"
-        className="hero-video"
-      />
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 w-full h-full pointer-events-none z-[1]"
+        className="absolute inset-0 w-full h-full"
       />
     </div>
   )
+}
+
+/* ── Helper: draw a lightning bolt ── */
+function drawBolt(
+  ctx: CanvasRenderingContext2D,
+  segs: { x: number; y: number }[],
+  hue: number,
+  alpha: number,
+  width: number
+) {
+  // Outer glow
+  ctx.beginPath()
+  ctx.strokeStyle = `hsla(${hue}, 100%, 55%, ${alpha * 0.4})`
+  ctx.lineWidth = width + 4
+  ctx.shadowColor = `hsla(${hue}, 100%, 50%, ${alpha * 0.8})`
+  ctx.shadowBlur = 25
+  ctx.lineJoin = "round"
+  ctx.lineCap = "round"
+  segs.forEach((s, j) => {
+    if (j === 0) ctx.moveTo(s.x, s.y)
+    else ctx.lineTo(s.x, s.y)
+  })
+  ctx.stroke()
+
+  // Bright core
+  ctx.beginPath()
+  ctx.strokeStyle = `hsla(${hue}, 80%, 80%, ${alpha * 0.9})`
+  ctx.lineWidth = width
+  ctx.shadowColor = `hsla(${hue}, 100%, 65%, ${alpha * 0.5})`
+  ctx.shadowBlur = 12
+  segs.forEach((s, j) => {
+    if (j === 0) ctx.moveTo(s.x, s.y)
+    else ctx.lineTo(s.x, s.y)
+  })
+  ctx.stroke()
+
+  // White-hot center
+  ctx.beginPath()
+  ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.6})`
+  ctx.lineWidth = Math.max(width * 0.3, 0.5)
+  ctx.shadowBlur = 0
+  segs.forEach((s, j) => {
+    if (j === 0) ctx.moveTo(s.x, s.y)
+    else ctx.lineTo(s.x, s.y)
+  })
+  ctx.stroke()
+  ctx.shadowBlur = 0
 }
 
 /* ── Energy Streams Button (on.energy) ── */
@@ -308,7 +524,7 @@ export function HeroSection() {
   return (
     <>
       <section ref={sectionRef} className="hero-fullbleed">
-        <TrailVideo />
+        <EnergyCableCanvas />
         <div className="hero-video-overlay" />
 
         <motion.div
