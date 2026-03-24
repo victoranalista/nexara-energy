@@ -44,98 +44,101 @@ export function Footer() {
   const isInView = useInView(ref, { once: true, margin: "-100px" })
 
   return (
-    <footer ref={ref} className="bg-background border-t border-border">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-8 lg:gap-12">
-          {/* Brand */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={isInView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.6 }}
-            className="col-span-2 md:col-span-3 lg:col-span-2"
-          >
-            <Link href="/" className="flex items-center gap-2 mb-4">
-              <Image
-                src="/images/nexara-logo.png"
-                alt="Nexara Energy"
-                width={140}
-                height={42}
-                className="h-10 w-auto object-contain"
-              />
-            </Link>
-            <p className="text-muted-foreground mb-6 max-w-xs">
-              Transformando casas em fontes de energia limpa com inteligência artificial. 
-              Pioneiros em soluções solares inteligentes em Brasília e região.
-            </p>
-            <div className="space-y-3 text-sm text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-accent" />
-                <span>Brasília, DF - Brasil</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Phone className="h-4 w-4 text-accent" />
-                <span>(61) 99422-7754</span>
-              </div>
-              <a 
-                href="https://wa.me/5561994227754" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 hover:text-green-500 transition-colors"
-              >
-                <MessageCircle className="h-4 w-4 text-green-500" />
-                <span>WhatsApp</span>
-              </a>
-            </div>
-          </motion.div>
-
-          {/* Links */}
-          {Object.entries(footerLinks).map(([category, links], categoryIndex) => (
+    <footer ref={ref} className="footer-onenergy">
+      {/* Yellow inner container (on.energy style) */}
+      <div className="footer-inner">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-8 lg:gap-12">
+            {/* Brand */}
             <motion.div
-              key={category}
               initial={{ opacity: 0, y: 20 }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.6, delay: 0.1 * (categoryIndex + 1) }}
+              transition={{ duration: 0.6 }}
+              className="col-span-2 md:col-span-3 lg:col-span-2"
             >
-              <h3 className="font-semibold mb-4 capitalize">{category}</h3>
-              <ul className="space-y-3">
-                {links.map((link) => (
-                  <li key={link.label}>
-                    <Link
-                      href={link.href}
-                      className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      {link.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Bottom */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={isInView ? { opacity: 1 } : {}}
-          transition={{ duration: 0.6, delay: 0.5 }}
-          className="mt-12 pt-8 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4"
-        >
-          <p className="text-sm text-muted-foreground">
-            © {new Date().getFullYear()} Nexara Energy. Todos os direitos reservados.
-          </p>
-          <div className="flex items-center gap-4">
-            {socialLinks.map((social) => (
-              <Link
-                key={social.label}
-                href={social.href}
-                aria-label={social.label}
-                className="p-2 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <social.icon className="h-5 w-5" />
+              <Link href="/" className="flex items-center gap-2 mb-4">
+                <Image
+                  src="/images/nexara-logo.png"
+                  alt="Nexara Energy"
+                  width={140}
+                  height={42}
+                  className="h-10 w-auto object-contain brightness-0"
+                />
               </Link>
+              <p className="text-black/60 mb-6 max-w-xs text-sm font-light">
+                Transformando casas em fontes de energia limpa com inteligência artificial.
+                Pioneiros em soluções solares inteligentes em Brasília e região.
+              </p>
+              <div className="space-y-3 text-sm text-black/60">
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-black/70" />
+                  <span>Brasília, DF - Brasil</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Phone className="h-4 w-4 text-black/70" />
+                  <span>(61) 99422-7754</span>
+                </div>
+                <a
+                  href="https://wa.me/5561994227754"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 hover:text-black transition-colors"
+                >
+                  <MessageCircle className="h-4 w-4 text-black/70" />
+                  <span>WhatsApp</span>
+                </a>
+              </div>
+            </motion.div>
+
+            {/* Links */}
+            {Object.entries(footerLinks).map(([category, links], categoryIndex) => (
+              <motion.div
+                key={category}
+                initial={{ opacity: 0, y: 20 }}
+                animate={isInView ? { opacity: 1, y: 0 } : {}}
+                transition={{ duration: 0.6, delay: 0.1 * (categoryIndex + 1) }}
+              >
+                <h3 className="font-semibold mb-4 capitalize text-black/90 text-sm">{category}</h3>
+                <ul className="space-y-3">
+                  {links.map((link) => (
+                    <li key={link.label}>
+                      <Link
+                        href={link.href}
+                        className="text-sm text-black/50 hover:text-black transition-colors"
+                      >
+                        {link.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
             ))}
           </div>
-        </motion.div>
+
+          {/* Bottom */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={isInView ? { opacity: 1 } : {}}
+            transition={{ duration: 0.6, delay: 0.5 }}
+            className="mt-12 pt-8 border-t border-black/10 flex flex-col sm:flex-row items-center justify-between gap-4"
+          >
+            <p className="text-sm text-black/50 font-light">
+              © {new Date().getFullYear()} Nexara Energy. Todos os direitos reservados.
+            </p>
+            <div className="flex items-center gap-4">
+              {socialLinks.map((social) => (
+                <Link
+                  key={social.label}
+                  href={social.href}
+                  aria-label={social.label}
+                  className="p-2 text-black/40 hover:text-black transition-colors"
+                >
+                  <social.icon className="h-5 w-5" />
+                </Link>
+              ))}
+            </div>
+          </motion.div>
+        </div>
       </div>
     </footer>
   )
