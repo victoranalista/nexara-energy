@@ -11,7 +11,35 @@ import { ArrowDown, MessageCircle } from "lucide-react"
 function TrailVideo() {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
 
+  // Force autoplay on mobile (iOS/Android block autoplay without interaction)
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const forcePlay = () => {
+      video.play().catch(() => {})
+    }
+
+    // Try immediately
+    forcePlay()
+
+    // Also try on first user interaction (fallback for strict browsers)
+    const handler = () => { forcePlay(); cleanup() }
+    const cleanup = () => {
+      document.removeEventListener("touchstart", handler)
+      document.removeEventListener("click", handler)
+      document.removeEventListener("scroll", handler)
+    }
+    document.addEventListener("touchstart", handler, { once: true, passive: true })
+    document.addEventListener("click", handler, { once: true })
+    document.addEventListener("scroll", handler, { once: true, passive: true })
+
+    return cleanup
+  }, [])
+
+  // Canvas lightning — funciona em tudo
   useEffect(() => {
     const container = containerRef.current
     const canvas = canvasRef.current
@@ -179,16 +207,16 @@ function TrailVideo() {
 
   return (
     <div ref={containerRef} className="absolute inset-0 z-0">
-      {/* Video nativo (GPU decoded) */}
       <video
+        ref={videoRef}
         src="/video/trail.mp4"
         autoPlay
         muted
         loop
         playsInline
-        className="absolute inset-0 w-full h-full object-cover"
+        preload="auto"
+        className="hero-video"
       />
-      {/* Canvas leve: só sparks + glow + mini lightnings */}
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full pointer-events-none z-[1]"
